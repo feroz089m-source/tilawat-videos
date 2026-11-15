@@ -8,7 +8,7 @@ H = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, f'{H}/data')
 from surahs import SURAH, juz
 W, HH, FPS = 1080, 1920, 30
-TEMPO, GAP, OUTRO = 1.06, 0.3, 0.5
+TEMPO, GAP, OUTRO = 1.06, 0.2, 0.5   # pause between ayahs ~0.5 s in total (tail+gap+lead)
 WORK = f'{H}/work'; os.makedirs(WORK, exist_ok=True)
 AUD = os.environ.get('AUDIO_REPO', '/tmp/aa')
 
@@ -51,7 +51,7 @@ for n, k in enumerate(AY):
     sg = QA[k]; K = len(AR[k]); assert len(sg) == K, (k, len(sg), K)
     fn = f'{AUD}/{files[n]}'
     d0 = float(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', fn]))
-    o0 = max(0, sg[0][2] / 1000 - 0.15); o1 = min(d0, sg[-1][3] / 1000 + 0.35)
+    o0 = max(0, sg[0][2] / 1000 - 0.08); o1 = min(d0, sg[-1][3] / 1000 + 0.25)
     WT = [[(sg[j][2] / 1000 - o0) / TEMPO, ((sg[j + 1][2] / 1000 if j + 1 < K else sg[j][3] / 1000 + 0.1) - o0) / TEMPO, j] for j in range(K)]
     d = (o1 - o0) / TEMPO
     run('ffmpeg', '-v', 'error', '-y', '-ss', str(o0), '-t', str(o1 - o0), '-i', fn, '-af',
@@ -132,8 +132,20 @@ def make_frame_fn():
     BG = [Image.open(f'{H}/assets/{f}').convert('RGB') for f in BGS]
     TX = [Image.open(f'{WORK}/t{i}.png').convert('RGBA') for i in range(len(segs))]
     HEAD = Image.open(f'{WORK}/head.png').convert('RGBA')
-    off = (S * 7 + A) % len(BGS)
-    PB = [(off + i // 2) % len(BGS) for i in range(len(segs))]
+    # background follows the meaning of each ayah (keywords in the Urdu translation)
+    THEME = [(2, ['جنت', 'باغ', 'نہر', 'پھل', 'نعمت', 'درخت', 'کھیتی', 'سبز']),          # kg: garden
+             (3, ['سمندر', 'دریا', 'پانی', 'کشتی', 'صبح', 'سورج', 'روشنی', 'دن', 'بارش', 'نور']),  # k3: sea/sunrise
+             (4, ['آگ', 'دوزخ', 'جہنم', 'عذاب', 'قیامت', 'ہلاک', 'ریت', 'صحرا', 'اونٹ', 'سختی']),   # k2: desert/crescent
+             (0, ['آسمان', 'ستار', 'رات', 'چاند', 'پہاڑ', 'زمین', 'پیدا', 'کائنات']),          # k1: mountains/milky way
+             (1, ['ہدایت', 'دل', 'سینہ', 'ذکر', 'رحمت', 'بخش', 'دعا', 'پروردگار'])]           # k4: forest/aurora
+    def theme(i):
+        k = tuple(segs[i]['k']); u = BISM_UR if segs[i]['n'] == 0 else UR.get(k, '')
+        best = max(THEME, key=lambda th: sum(u.count(w) for w in th[1]))
+        return best[0] if sum(u.count(w) for w in best[1]) else None
+    off = (S * 7 + A) % len(BGS); PB = []
+    for i in range(len(segs)):
+        th = theme(i)
+        PB.append(th if th is not None else (PB[-1] if PB else off))
     bstart, bidx = [], []
     for i, s_ in enumerate(segs):
         if not bidx or PB[i] != bidx[-1]: bidx.append(PB[i]); bstart.append(0.0 if i == 0 else s_['s'] - 0.3)
