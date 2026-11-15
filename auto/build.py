@@ -99,7 +99,7 @@ snip = ' '.join(first[:5]) + (' …' if len(first) > 5 else '')
 rng = 'FULL' if whole else f'{A}-{B}'
 thumb = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 @font-face{{font-family:AB;src:url('file://{F}/Amiri-Bold.ttf')}}@font-face{{font-family:AQ;src:url('file://{F}/AmiriQuran.ttf')}}@font-face{{font-family:NQ;src:url('file://{F}/nastaliq.ttf')}}
-html,body{{margin:0;width:1080px;height:1920px;overflow:hidden;background:url('file://{H}/assets/tbg.png')}}
+html,body{{margin:0;width:1080px;height:1920px;overflow:hidden;background:url('file://{WORK}/thumbbg.jpg')}}
 .t1{{position:absolute;top:470px;left:0;right:0;text-align:center;font-family:AB;font-size:{230 if len(ARN) <= 7 else 170}px;line-height:1.3;color:#ffe3a0;direction:rtl;text-shadow:0 6px 0 #5a4010,0 0 30px rgba(255,210,120,.55)}}
 .q{{position:absolute;top:840px;left:60px;right:60px;text-align:center;font-family:AQ;font-size:84px;color:#fff;direction:rtl;text-shadow:0 3px 8px #000}}
 .b{{position:absolute;top:1130px;left:160px;right:160px;background:rgba(10,20,40,.7);border:3px solid #ffe3a0;border-radius:60px;text-align:center;font-family:NQ;font-size:56px;color:#fff;padding:4px 0 28px;direction:rtl}}
@@ -108,6 +108,38 @@ html,body{{margin:0;width:1080px;height:1920px;overflow:hidden;background:url('f
 </style></head><body><div class="t1">{ARN}</div><div class="q">{snip}</div><div class="b">{subtxt.split(' • ')[0]} • اردو ترجمہ</div>
 <div class="en">SURAH {EN.upper()} {'' if whole else rng}</div><div class="r">Sheikh Mishary Alafasy</div></body></html>"""
 
+PHOTOS = sorted(os.listdir(f'{H}/photos'))
+CATS = {}
+for p in PHOTOS: CATS.setdefault(p.split('_')[0], []).append(p)
+# background follows the meaning of each ayah (keywords in the Urdu translation) -> photo category
+THEME = [(['garden', 'waterfall'], ['جنت', 'باغ', 'نہر', 'پھل', 'نعمت', 'درخت', 'کھیتی', 'سبز', 'چشم']),
+         (['sea', 'waterfall'], ['سمندر', 'دریا', 'پانی', 'کشتی', 'بارش', 'مینہ']),
+         (['sea'], ['صبح', 'سورج', 'روشنی', 'نور', 'چاشت', 'فجر']),
+         (['desert', 'clouds'], ['آگ', 'دوزخ', 'جہنم', 'عذاب', 'قیامت', 'ہلاک', 'ریت', 'صحرا', 'اونٹ', 'سختی', 'مشکل']),
+         (['night', 'stars'], ['رات', 'چاند', 'ستار', 'تاریک', 'اندھیر']),
+         (['stars', 'clouds'], ['آسمان', 'کائنات', 'بادل', 'ہوا']),
+         (['mountain'], ['پہاڑ', 'زمین', 'پتھر']),
+         (['mosque', 'clouds', 'forest'], ['ہدایت', 'نماز', 'مسجد', 'عبادت', 'سجد', 'ذکر', 'دعا', 'رحمت', 'بخش'])]
+DEFAULT = ['mountain', 'forest', 'clouds', 'stars', 'night', 'sea']
+def ss(x): x = max(0, min(1, x)); return x * x * (3 - 2 * x)
+def pick_photos():
+    seed = S * 31 + A * 7
+    used, PB, last = set(), [], None
+    for i, sg in enumerate(segs):
+        k = tuple(sg['k']); u = BISM_UR if sg['n'] == 0 else UR.get(k, '')
+        best = max(THEME, key=lambda th: sum(u.count(w) for w in th[1]))
+        cats = best[0] if sum(u.count(w) for w in best[1]) else None
+        if cats is None and last is not None and i % 2 == 1: PB.append(last); continue   # keep scene for 2 ayahs
+        cats = [c for c in (cats or [DEFAULT[(seed + i) % len(DEFAULT)]]) if c in CATS] or DEFAULT
+        pool = [p for c in cats for p in CATS.get(c, [])]
+        fresh = [p for p in pool if p not in used] or pool
+        p = fresh[(seed + i * 3) % len(fresh)]
+        if p == last and len(pool) > 1: p = [q for q in pool if q != last][0]
+        used.add(p); PB.append(p); last = p
+    return PB
+PB0 = pick_photos()
+_tb = Image.open(f'{H}/photos/{PB0[min(1, len(PB0) - 1)]}').convert('RGB').resize((W, HH))
+Image.blend(_tb, Image.new('RGB', (W, HH)), 0.45).save(f'{WORK}/thumbbg.jpg', quality=90)
 async def render():
     from playwright.async_api import async_playwright
     BX = []
@@ -126,37 +158,35 @@ BX = asyncio.run(render())
 json.dump({'segs': segs, 'total': TOTAL, 'boxes': BX, 'S': S, 'A': A, 'B': B}, open(f'{WORK}/timings.json', 'w'))
 
 # ---------- frames ----------
-BGS = ['k1.png', 'k4.png', 'kg.png', 'k3.png', 'k2.png']
-def ss(x): x = max(0, min(1, x)); return x * x * (3 - 2 * x)
 def make_frame_fn():
-    BG = [Image.open(f'{H}/assets/{f}').convert('RGB') for f in BGS]
     TX = [Image.open(f'{WORK}/t{i}.png').convert('RGBA') for i in range(len(segs))]
     HEAD = Image.open(f'{WORK}/head.png').convert('RGBA')
-    # background follows the meaning of each ayah (keywords in the Urdu translation)
-    THEME = [(2, ['جنت', 'باغ', 'نہر', 'پھل', 'نعمت', 'درخت', 'کھیتی', 'سبز']),          # kg: garden
-             (3, ['سمندر', 'دریا', 'پانی', 'کشتی', 'صبح', 'سورج', 'روشنی', 'دن', 'بارش', 'نور']),  # k3: sea/sunrise
-             (4, ['آگ', 'دوزخ', 'جہنم', 'عذاب', 'قیامت', 'ہلاک', 'ریت', 'صحرا', 'اونٹ', 'سختی']),   # k2: desert/crescent
-             (0, ['آسمان', 'ستار', 'رات', 'چاند', 'پہاڑ', 'زمین', 'پیدا', 'کائنات']),          # k1: mountains/milky way
-             (1, ['ہدایت', 'دل', 'سینہ', 'ذکر', 'رحمت', 'بخش', 'دعا', 'پروردگار'])]           # k4: forest/aurora
-    def theme(i):
-        k = tuple(segs[i]['k']); u = BISM_UR if segs[i]['n'] == 0 else UR.get(k, '')
-        best = max(THEME, key=lambda th: sum(u.count(w) for w in th[1]))
-        return best[0] if sum(u.count(w) for w in best[1]) else None
-    off = (S * 7 + A) % len(BGS); PB = []
-    for i in range(len(segs)):
-        th = theme(i)
-        PB.append(th if th is not None else (PB[-1] if PB else off))
-    bstart, bidx = [], []
+    PB = pick_photos()
+    IMG = {}
+    for p in set(PB):
+        im = Image.open(f'{H}/photos/{p}').convert('RGB')
+        # darken + slight vignette so Arabic/Urdu text stays readable
+        dark = Image.new('RGB', im.size, (0, 0, 0)); im = Image.blend(im, dark, 0.38)
+        IMG[p] = im
+    bstart, bidx, bend = [], [], []
     for i, s_ in enumerate(segs):
-        if not bidx or PB[i] != bidx[-1]: bidx.append(PB[i]); bstart.append(0.0 if i == 0 else s_['s'] - 0.3)
+        if not bidx or PB[i] != bidx[-1]: bidx.append(PB[i]); bstart.append(0.0 if i == 0 else s_['s'] - 0.4)
+    bstart.append(TOTAL + 2)
+    GW, GH = 1188, 2112
+    def view(i, t):
+        # slow Ken-Burns zoom + pan inside the 10% headroom
+        t0, t1 = bstart[i], bstart[i + 1] + 1.2; k = ss((t - t0) / max(1, t1 - t0))
+        z = 1.0 + 0.09 * (k if i % 2 == 0 else 1 - k)
+        cw, ch = GW * 0.92 / z, GH * 0.92 / z
+        cx = GW / 2 + (GW - cw) / 2 * (0.6 * math.sin(i * 1.7) * (k - 0.5) * 2)
+        cy = GH / 2 + (GH - ch) / 2 * (0.6 * math.cos(i * 1.3) * (k - 0.5) * 2)
+        box = (cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
+        return IMG[bidx[i]].resize((W, HH), Image.BILINEAR, box=box)
     def bgframe(t):
-        q = max(i for i in range(len(bstart)) if bstart[i] <= t)
-        def crop(i, tt):
-            o = int((2200 - HH) * (0.5 + 0.5 * math.sin(tt * 0.05 + i))); return BG[i].crop((0, o, W, o + HH))
-        cur = crop(bidx[q], t)
-        if q > 0 and t - bstart[q] < 1.2: cur = Image.blend(crop(bidx[q - 1], t), cur, ss((t - bstart[q]) / 1.2))
+        q = max(i for i in range(len(bidx)) if bstart[i] <= t)
+        cur = view(q, t)
+        if q > 0 and t - bstart[q] < 1.0: cur = Image.blend(view(q - 1, t), cur, ss((t - bstart[q]) / 1.0))
         return cur
-    rg = np.random.default_rng(9); TW = [(rg.integers(0, W), rg.integers(80, 1000), rg.uniform(0, 6.28), rg.uniform(1.5, 4)) for _ in range(35)]
     D = f'{H}/subs/'
     SUB = {n: Image.open(D + n + '.png').convert('RGBA') for n in ('subA', 'subB', 'subC')}
     SPOS = {n: [int(x) for x in open(D + n + '_pos.txt').read().split(',')] for n in ('subA', 'subB', 'subC')}
@@ -174,10 +204,7 @@ def make_frame_fn():
             img.paste(HAND, (int(p[0] - HT[0]), int(p[1] - HT[1])), HAND)
     SUBT = [2.5] + ([TOTAL - 12] if TOTAL > 30 else [])
     def frame(t):
-        img = bgframe(t).convert('RGBA'); d = ImageDraw.Draw(img)
-        for (x, y, ph, sp) in TW:
-            v = 0.5 + 0.5 * math.sin(t * sp + ph)
-            if v > 0.75: r = 1 + 1.5 * (v - 0.75) * 4; d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, int(255 * (v - 0.75) * 4)))
+        img = bgframe(t).convert('RGBA')
         img.alpha_composite(HEAD)
         for k, s in enumerate(segs):
             st = s['s']; en = segs[k + 1]['s'] if k + 1 < len(segs) else TOTAL - 0.6
