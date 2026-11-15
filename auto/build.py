@@ -7,9 +7,10 @@ from PIL import Image, ImageDraw, ImageFilter
 H = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, f'{H}/data')
 from surahs import SURAH, juz
-W, HH, FPS = 1080, 1920, 30
+LONG = os.environ.get('LONG') == '1'   # landscape long video for YouTube
+W, HH, FPS = (1920, 1080, 25) if LONG else (1080, 1920, 30)
 TEMPO, GAP, OUTRO = 1.06, 0.0, 0.5   # continuous recitation: next ayah starts right after the previous one
-WORK = f'{H}/work'; os.makedirs(WORK, exist_ok=True)
+WORK = f'{H}/work_long' if LONG else f'{H}/work'; os.makedirs(WORK, exist_ok=True)
 AUD = os.environ.get('AUDIO_REPO', '/tmp/aa')
 
 def run(*a): subprocess.run(a, check=True)
@@ -18,8 +19,8 @@ def norm(s):
     return re.sub(r'\s+', ' ', s.replace('ࣰ', 'ً').replace('ࣱ', 'ٌ').replace('ࣲ', 'ٍ'))
 
 # ---------- choose item ----------
-plan = json.load(open(f'{H}/plan.json'))
-st_path = f'{H}/state.json'
+plan = json.load(open(f'{H}/plan_long.json' if LONG else f'{H}/plan.json'))
+st_path = f'{H}/state_long.json' if LONG else f'{H}/state.json'
 state = json.load(open(st_path)) if os.path.exists(st_path) else {'next': 0, 'done': []}
 if len(sys.argv) == 4: S, A, B = map(int, sys.argv[1:])
 else:
@@ -34,7 +35,8 @@ for line in open(f'{H}/data/ara-quranuthmanihaf.txt', encoding='utf-8'):
 for line in open(f'{H}/data/urd-fatehmuhammadja.txt', encoding='utf-8'):
     q = line.rstrip('\n').split('|')
     if len(q) == 3 and int(q[0]) == S: UR[(S, int(q[1]))] = q[2].replace('ﷺ', ' صلی اللہ علیہ وسلم ').replace('  ', ' ').strip()
-QA = {(e['surah'], e['ayah']): e['segments'] for e in json.load(open(f'{H}/data/Alafasy_128kbps.json')) if e['surah'] in (1, S)}
+_qa = [e for e in json.load(open(f'{H}/data/Alafasy_128kbps.json')) if e['surah'] in (1, S)]
+QA = {(e['surah'], e['ayah']): e['segments'] for e in _qa}; QST = {(e['surah'], e['ayah']): e['stats'] for e in _qa}
 BISMILLAH = A == 1 and S not in (1, 9)
 AY = ([(1, 1)] if BISMILLAH else []) + [(S, a) for a in range(A, B + 1)]
 
@@ -48,11 +50,22 @@ run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-t', str(max(GAP, 0.05)), '-i
 run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-t', str(OUTRO + 1.2), '-i', 'anullsrc=r=44100:cl=mono', f'{WORK}/sil.wav')
 segs, alist, t = [], [], 0.0
 for n, k in enumerate(AY):
-    sg = QA[k]; K = len(AR[k]); assert len(sg) == K, (k, len(sg), K)
+    sg = QA.get(k, []); K = len(AR[k])
     fn = f'{AUD}/{files[n]}'
     d0 = float(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', fn]))
-    o0 = max(0, sg[0][2] / 1000 - 0.05); o1 = min(d0, sg[-1][3] / 1000 + 0.15)
-    WT = [[(sg[j][2] / 1000 - o0) / TEMPO, ((sg[j + 1][2] / 1000 if j + 1 < K else sg[j][3] / 1000 + 0.1) - o0) / TEMPO, j] for j in range(K)]
+    good = len(sg) == K and all(g[0] == j and g[1] == j + 1 for j, g in enumerate(sg))
+    if good and k in QST and QST[k]['insertions']:
+        good = all(sg[j + 1][2] - sg[j][3] <= 1200 for j in range(K - 1)) and all(g[3] - g[2] < 3500 for g in sg)
+    if good:
+        o0 = max(0, sg[0][2] / 1000 - 0.05); o1 = min(d0, sg[-1][3] / 1000 + 0.15)
+        WT = [[(sg[j][2] / 1000 - o0) / TEMPO, ((sg[j + 1][2] / 1000 if j + 1 < K else sg[j][3] / 1000 + 0.1) - o0) / TEMPO, j] for j in range(K)]
+    else:
+        assert LONG, ('unaligned ayah in short', k)
+        sd = subprocess.run(['ffmpeg', '-i', fn, '-af', 'silencedetect=n=-40dB:d=0.15', '-f', 'null', '-'], capture_output=True, text=True).stderr
+        ends = [float(x) for x in re.findall(r'silence_end: ([0-9.]+)', sd)]; starts = [float(x) for x in re.findall(r'silence_start: ([0-9.]+)', sd)]
+        o0 = max(0, (ends[0] if starts and starts[0] < 0.05 and ends else 0) - 0.05)
+        o1 = min(d0, (starts[-1] if starts and starts[-1] > o0 + 0.5 and (len(ends) < len(starts)) else d0) + 0.15)
+        WT = []
     d = (o1 - o0) / TEMPO
     run('ffmpeg', '-v', 'error', '-y', '-ss', str(o0), '-t', str(o1 - o0), '-i', fn, '-af',
         f'atempo={TEMPO},afade=t=in:d=0.02,afade=t=out:st={max(0, d - 0.12)}:d=0.12', '-ar', '44100', '-ac', '1', f'{WORK}/r{n}.wav')
@@ -81,9 +94,15 @@ html,body{{margin:0;width:1080px;height:1920px;background:transparent;overflow:h
 .hd{{position:absolute;top:150px;left:0;right:0;text-align:center;font-family:AB;font-size:100px;color:#ffe08a;text-shadow:0 0 14px rgba(255,210,140,.5),0 4px 8px #000}}
 .sub{{position:absolute;top:290px;left:0;right:0;text-align:center;font-family:NQ;font-size:42px;color:#dfe9ff;text-shadow:0 2px 6px #000;direction:rtl}}
 .line{{position:absolute;top:380px;left:50%;transform:translateX(-50%);width:420px;height:2px;background:linear-gradient(90deg,transparent,#ffe08a,transparent)}}"""
-FIT = """()=>{const a=document.querySelector('.ar'),u=document.querySelector('.ur');let fa=100,fu=52;
-for(let i=0;i<60;i++){if(a.offsetHeight+u.offsetHeight+36<=900&&a.offsetHeight<=600)break;
- if(a.offsetHeight>600||fa/100>fu/52){fa-=4;a.style.fontSize=fa+'px'}else{fu-=2;u.style.fontSize=fu+'px'}}}"""
+if LONG:
+    CSS = CSS.replace('width:1080px;height:1920px', 'width:1920px;height:1080px').replace('left:60px;right:60px;top:500px;height:900px', 'left:140px;right:140px;top:200px;height:760px')
+    CSS = CSS.replace('.hd{{', '.hd{{').replace('top:150px;left:0;right:0;text-align:center;font-family:AB;font-size:100px', 'top:28px;left:0;right:0;text-align:center;font-family:AB;font-size:64px')
+    CSS = CSS.replace('top:290px;left:0;right:0;text-align:center;font-family:NQ;font-size:42px', 'top:118px;left:0;right:0;text-align:center;font-family:NQ;font-size:30px')
+    CSS = CSS.replace('top:380px;left:50%', 'top:180px;left:50%').replace('font-size:100px;line-height:1.85', 'font-size:84px;line-height:1.8')
+FIT = """()=>{const a=document.querySelector('.ar'),u=document.querySelector('.ur');let fa=FA,fu=52;
+for(let i=0;i<80;i++){if(a.offsetHeight+u.offsetHeight+36<=HT&&a.offsetHeight<=AH)break;
+ if(a.offsetHeight>AH||fa/FA>fu/52){fa-=4;a.style.fontSize=fa+'px'}else{fu-=2;u.style.fontSize=fu+'px'}}}"""
+FIT = FIT.replace('FA', '84' if LONG else '100').replace('HT', '760' if LONG else '900').replace('AH', '480' if LONG else '600')
 NAY = max(a for s, a in AR if s == S)
 whole = A == 1 and B == NAY
 subtxt = ('مکمل سورت' if whole else f'آیات {ard(A)} تا {ard(B)}') + f' • پارہ {ard(juz(S, A))} • شیخ مشاری العفاسی'
@@ -107,6 +126,11 @@ html,body{{margin:0;width:1080px;height:1920px;overflow:hidden;background:url('f
 .r{{position:absolute;top:1420px;left:0;right:0;text-align:center;font:600 44px Arial;color:#dfe8ff;text-shadow:0 3px 6px #000}}
 </style></head><body><div class="t1">{ARN}</div><div class="q">{snip}</div><div class="b">{subtxt.split(' • ')[0]} • اردو ترجمہ</div>
 <div class="en">SURAH {EN.upper()} {'' if whole else rng}</div><div class="r">Sheikh Mishary Alafasy</div></body></html>"""
+if LONG:
+    thumb = thumb.replace('width:1080px;height:1920px', 'width:1920px;height:1080px')
+    for a_, b_ in [('top:470px', 'top:90px'), ('top:840px;left:60px;right:60px', 'top:440px;left:160px;right:160px'), ('top:1130px;left:160px;right:160px', 'top:640px;left:560px;right:560px'),
+                   ('top:1320px', 'top:820px'), ('top:1420px', 'top:920px')]:
+        thumb = thumb.replace(a_, b_)
 
 PHOTOS = sorted(os.listdir(f'{H}/photos'))
 CATS = {}
@@ -138,7 +162,9 @@ def pick_photos():
         used.add(p); PB.append(p); last = p
     return PB
 PB0 = pick_photos()
-_tb = Image.open(f'{H}/photos/{PB0[min(1, len(PB0) - 1)]}').convert('RGB').resize((W, HH))
+_tb = Image.open(f'{H}/photos/{PB0[min(1, len(PB0) - 1)]}').convert('RGB')
+if LONG: _tb = _tb.crop((0, int(_tb.height * 0.42 - 334), 1188, int(_tb.height * 0.42 + 334)))
+_tb = _tb.resize((W, HH), Image.LANCZOS)
 Image.blend(_tb, Image.new('RGB', (W, HH)), 0.45).save(f'{WORK}/thumbbg.jpg', quality=90)
 async def render():
     from playwright.async_api import async_playwright
@@ -165,6 +191,8 @@ def make_frame_fn():
     IMG = {}
     for p in set(PB):
         im = Image.open(f'{H}/photos/{p}').convert('RGB')
+        if LONG:   # landscape band from the portrait photo
+            y0 = int(im.height * 0.42 - 668 / 2); im = im.crop((0, y0, 1188, y0 + 668)).resize((2112, 1188), Image.LANCZOS)
         # darken + slight vignette so Arabic/Urdu text stays readable
         dark = Image.new('RGB', im.size, (0, 0, 0)); im = Image.blend(im, dark, 0.38)
         IMG[p] = im
@@ -172,7 +200,7 @@ def make_frame_fn():
     for i, s_ in enumerate(segs):
         if not bidx or PB[i] != bidx[-1]: bidx.append(PB[i]); bstart.append(0.0 if i == 0 else s_['s'] - 0.4)
     bstart.append(TOTAL + 2)
-    GW, GH = 1188, 2112
+    GW, GH = (2112, 1188) if LONG else (1188, 2112)
     def view(i, t):
         # slow Ken-Burns zoom + pan inside the 10% headroom
         t0, t1 = bstart[i], bstart[i + 1] + 1.2; k = ss((t - t0) / max(1, t1 - t0))
@@ -190,19 +218,19 @@ def make_frame_fn():
     D = f'{H}/subs/'
     SUB = {n: Image.open(D + n + '.png').convert('RGBA') for n in ('subA', 'subB', 'subC')}
     SPOS = {n: [int(x) for x in open(D + n + '_pos.txt').read().split(',')] for n in ('subA', 'subB', 'subC')}
-    HAND = Image.open(D + 'hand.png').convert('RGBA'); HT = (45, 6); SY = 1660
+    HAND = Image.open(D + 'hand.png').convert('RGBA'); HT = (45, 6); SY = HH - 260 if LONG else 1660; CX = W // 2
     def lerp(a, b, k): return (a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k)
     def sub_overlay(img, t):
         if not (4.8 <= t <= 9.8): return
         n = 'subA' if t < 6.15 else ('subB' if t < 7.35 else 'subC'); c = SUB[n].copy(); bx, byy, lx, ly, cw, ch = SPOS[n]
         a = ss((t - 4.8) / 0.4) * (1 - ss((t - 9.3) / 0.5)); dy = int((1 - ss((t - 4.8) / 0.4)) * 40)
         if a < 1: c.putalpha(c.getchannel('A').point(lambda v: int(v * a)))
-        img.paste(c, (540 - c.width // 2, SY + dy), c)
+        img.paste(c, (CX - c.width // 2, SY + dy), c)
         if t >= 5.2:
-            l0 = 540 - cw // 2; btn = (l0 + bx, SY + byy + 8); bell = (l0 + lx, SY + ly + 10); st0 = (900, 1950); en = (1000, 1980)
+            l0 = CX - cw // 2; btn = (l0 + bx, SY + byy + 8); bell = (l0 + lx, SY + ly + 10); st0 = (CX + 360, HH + 30); en = (CX + 460, HH + 60)
             p = lerp(st0, btn, ss((t - 5.2) / 0.8)) if t < 6 else btn if t < 6.6 else lerp(btn, bell, ss((t - 6.6) / 0.6)) if t < 7.2 else bell if t < 7.8 else lerp(bell, en, ss((t - 7.8) / 0.8))
             img.paste(HAND, (int(p[0] - HT[0]), int(p[1] - HT[1])), HAND)
-    SUBT = [2.5] + ([TOTAL - 12] if TOTAL > 30 else [])
+    SUBT = ([3.0] + [x for x in range(70, int(TOTAL) - 15, 75)][:5]) if LONG else ([2.5] + ([TOTAL - 12] if TOTAL > 30 else []))
     def frame(t):
         img = bgframe(t).convert('RGBA')
         img.alpha_composite(HEAD)
@@ -213,9 +241,11 @@ def make_frame_fn():
                 if a < 1: tx = tx.copy(); tx.putalpha(tx.getchannel('A').point(lambda v: int(v * a)))
                 for ws, we, wi in s['words']:
                     if ws <= t < we:
-                        x0, y0, bw, bh = BX[k][wi]; ov = Image.new('RGBA', (W, HH), (0, 0, 0, 0))
-                        ImageDraw.Draw(ov).rounded_rectangle([x0 - 8, y0 + bh * 0.15, x0 + bw + 8, y0 + bh * 0.9], radius=22, fill=(255, 215, 130, int(45 * a)))
-                        img.alpha_composite(ov.filter(ImageFilter.GaussianBlur(4)))
+                        x0, y0, bw, bh = BX[k][wi]; P_ = 20; ox, oy = int(x0) - 8 - P_, int(y0 + bh * 0.15) - P_
+                        ov = Image.new('RGBA', (int(bw) + 16 + 2 * P_, int(bh * 0.75) + 2 * P_), (0, 0, 0, 0))
+                        ImageDraw.Draw(ov).rounded_rectangle([P_, P_, ov.width - P_, ov.height - P_], radius=22, fill=(255, 215, 130, int(45 * a)))
+                        ov = ov.filter(ImageFilter.GaussianBlur(4))
+                        img.alpha_composite(ov, dest=(max(0, ox), max(0, oy)), source=(max(0, -ox), max(0, -oy)))
                 img.alpha_composite(tx)
         for T0 in SUBT:
             if T0 <= t <= T0 + 5.0: sub_overlay(img, t - T0 + 4.8)
@@ -225,22 +255,22 @@ def make_frame_fn():
 def render_part(args):
     f0, f1, out = args; frame = make_frame_fn()
     ff = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{HH}', '-r', str(FPS), '-i', '-',
-                           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', out + '.tmp.mp4'], stdin=subprocess.PIPE)
+                           '-c:v', 'libx264', '-preset', 'veryfast'] + (['-crf', '24', '-maxrate', '1100k', '-bufsize', '2200k'] if LONG else ['-crf', '20']) + ['-pix_fmt', 'yuv420p', out + '.tmp.mp4'], stdin=subprocess.PIPE)
     for f in range(f0, f1): ff.stdin.write(frame(f / FPS).tobytes())
     ff.stdin.close(); assert ff.wait() == 0; os.rename(out + '.tmp.mp4', out)
 
 if __name__ == '__main__':
     if os.environ.get('PREVIEW'):
         fr = make_frame_fn()
-        for t in map(float, os.environ['PREVIEW'].split(',')): fr(t).resize((360, 640)).save(f'{WORK}/prev_{t}.png')
+        for t in map(float, os.environ['PREVIEW'].split(',')): fr(t).resize((W // 3, HH // 3)).save(f'{WORK}/prev_{t}.png')
         sys.exit()
     from multiprocessing import Pool
     NF = int(TOTAL * FPS); P = max(1, min(4, os.cpu_count() or 1)); step = math.ceil(NF / P)
     parts = [(i * step, min(NF, (i + 1) * step), f'{WORK}/c{i}.mp4') for i in range(P) if i * step < NF]
     with Pool(len(parts)) as pool: pool.map(render_part, parts)
     for name, d in (('th0', 0.5), ('th1', 1.0)):
-        run('ffmpeg', '-v', 'error', '-y', '-framerate', '30', '-i', f'{WORK}/thumb.png', '-vf', f'format=yuv420p,loop=-1:1,trim=duration={d}',
-            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', f'{WORK}/{name}.mp4')
+        run('ffmpeg', '-v', 'error', '-y', '-framerate', str(FPS), '-i', f'{WORK}/thumb.png', '-vf', f'format=yuv420p,loop=-1:1,trim=duration={d}',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', str(FPS), f'{WORK}/{name}.mp4')
     open(f'{WORK}/cl.txt', 'w').write("file 'th0.mp4'\n" + ''.join(f"file 'c{i}.mp4'\n" for i in range(len(parts))) + "file 'th1.mp4'\n")
     run('ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', f'{WORK}/cl.txt', '-c', 'copy', f'{WORK}/vid.mp4')
     D = float(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f'{WORK}/vid.mp4']))
@@ -260,5 +290,13 @@ if __name__ == '__main__':
             'tiktok_title': f'سورہ {ARN} {"" if whole else "آیت " + rng_t} | Surah {EN} 🤍'.replace('  ', ' '),
             'tiktok_text': f'سورہ {ARN} {"مکمل" if whole else "آیت " + rng_t} | Surah {EN} | Mishary Alafasy 🤍 اردو ترجمہ کے ساتھ\n#quran #surah{tag} #tilawat #islam #fyp',
             'pin_comment': f'{" ".join(first)} 🤍 کون کون سن رہا ہے؟ کمنٹ میں "سبحان اللہ" لکھیں اور Peaceful Tilawat کو سبسکرائب کریں'}
+    if LONG:
+        rl = 'Full' if whole else f'Ayat {A}-{B}'
+        t1 = f'Surah {EN} ({rl}) | سورہ {ARN} | Mishary Alafasy | Urdu Translation 🤍 Heart Touching Tilawat'
+        if len(t1) > 100: t1 = f'Surah {EN} ({rl}) | سورہ {ARN} | Mishary Alafasy | Urdu Translation 🤍'
+        mins = int(D // 60)
+        meta.update({'youtube_title': t1,
+                     'youtube_text': f'Surah {EN} ({rl}) – beautiful recitation by Sheikh Mishary Rashid Alafasy with Urdu translation (Fateh Muhammad Jalandhari) and word-by-word highlight 🤍\n\n{" ".join(first)}\n\nسورہ {ARN} {"مکمل" if whole else "آیات " + str(A) + " تا " + str(B)} • اردو ترجمہ کے ساتھ\n\nSubscribe to Peaceful Tilawat for daily Quran recitation.\n#quran #surah{tag} #tilawat #mishary #urdutranslation #quranrecitation',
+                     'youtube_tags': ['quran', f'surah {EN.lower()}', 'tilawat', 'mishary alafasy', 'urdu translation', 'quran recitation', 'heart touching tilawat']})
     json.dump(meta, open(f'{WORK}/meta.json', 'w'), ensure_ascii=False, indent=1)
     print(json.dumps(meta, ensure_ascii=False, indent=1))
