@@ -1,7 +1,7 @@
 """Builds auto/plan.json: an ordered list of short (<55 s) Mishary Alafasy segments."""
 import json, re, os
 H = os.path.dirname(os.path.abspath(__file__))
-TEMPO, GAP, MAXD = 1.06, 0.3, 50.0
+TEMPO, GAP, MAXD = 1.06, 0.0, 50.0
 QA = {(e['surah'], e['ayah']): e for e in json.load(open(f'{H}/data/Alafasy_128kbps.json'))}
 def norm(s):
     s = s.replace('‏', '').strip(); s = re.sub(r'([ࣰࣱࣲ]) (ا)', r'\1\2', s)

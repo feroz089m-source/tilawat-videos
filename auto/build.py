@@ -8,7 +8,7 @@ H = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, f'{H}/data')
 from surahs import SURAH, juz
 W, HH, FPS = 1080, 1920, 30
-TEMPO, GAP, OUTRO = 1.06, 0.2, 0.5   # pause between ayahs ~0.5 s in total (tail+gap+lead)
+TEMPO, GAP, OUTRO = 1.06, 0.0, 0.5   # continuous recitation: next ayah starts right after the previous one
 WORK = f'{H}/work'; os.makedirs(WORK, exist_ok=True)
 AUD = os.environ.get('AUDIO_REPO', '/tmp/aa')
 
@@ -44,20 +44,20 @@ if not os.path.isdir(f'{AUD}/.git'):
 files = [f'{s:03d}{a:03d}.mp3' for s, a in AY]
 run('git', '-C', AUD, 'checkout', 'HEAD', '--', *files)
 
-run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-t', str(GAP), '-i', 'anullsrc=r=44100:cl=mono', f'{WORK}/gap.wav')
+run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-t', str(max(GAP, 0.05)), '-i', 'anullsrc=r=44100:cl=mono', f'{WORK}/gap.wav')
 run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-t', str(OUTRO + 1.2), '-i', 'anullsrc=r=44100:cl=mono', f'{WORK}/sil.wav')
 segs, alist, t = [], [], 0.0
 for n, k in enumerate(AY):
     sg = QA[k]; K = len(AR[k]); assert len(sg) == K, (k, len(sg), K)
     fn = f'{AUD}/{files[n]}'
     d0 = float(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', fn]))
-    o0 = max(0, sg[0][2] / 1000 - 0.08); o1 = min(d0, sg[-1][3] / 1000 + 0.25)
+    o0 = max(0, sg[0][2] / 1000 - 0.05); o1 = min(d0, sg[-1][3] / 1000 + 0.15)
     WT = [[(sg[j][2] / 1000 - o0) / TEMPO, ((sg[j + 1][2] / 1000 if j + 1 < K else sg[j][3] / 1000 + 0.1) - o0) / TEMPO, j] for j in range(K)]
     d = (o1 - o0) / TEMPO
     run('ffmpeg', '-v', 'error', '-y', '-ss', str(o0), '-t', str(o1 - o0), '-i', fn, '-af',
         f'atempo={TEMPO},afade=t=in:d=0.02,afade=t=out:st={max(0, d - 0.12)}:d=0.12', '-ar', '44100', '-ac', '1', f'{WORK}/r{n}.wav')
     alist.append(f"file '{WORK}/r{n}.wav'")
-    if n < len(AY) - 1: alist.append(f"file '{WORK}/gap.wav'")
+    if n < len(AY) - 1 and GAP > 0: alist.append(f"file '{WORK}/gap.wav'")
     segs.append({'k': list(k), 'n': 0 if k == (1, 1) and BISMILLAH else k[1], 's': t, 'e': t + d,
                  'words': [[t + x, t + y, j] for x, y, j in WT]})
     t += d + (GAP if n < len(AY) - 1 else 0)
