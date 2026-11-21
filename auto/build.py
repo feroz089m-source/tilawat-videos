@@ -32,9 +32,9 @@ AR, UR = {}, {}
 for line in open(f'{H}/data/ara-quranuthmanihaf.txt', encoding='utf-8'):
     q = line.rstrip('\n').split('|')
     if len(q) == 3 and int(q[0]) in (1, S): AR[(int(q[0]), int(q[1]))] = norm(q[2]).split(' ')
-for line in open(f'{H}/data/urd-fatehmuhammadja.txt', encoding='utf-8'):
-    q = line.rstrip('\n').split('|')
-    if len(q) == 3 and int(q[0]) == S: UR[(S, int(q[1]))] = q[2].replace('ﷺ', ' صلی اللہ علیہ وسلم ').replace('  ', ' ').strip()
+for line in open(f'{H}/data/eng-itani-allah.txt', encoding='utf-8'):   # Translation by Talal Itani, ClearQuran.com (CC BY-ND 4.0)
+    q = line.rstrip('\n').split('|', 2)
+    if len(q) == 3 and int(q[0]) == S: UR[(S, int(q[1]))] = q[2].strip()
 _qa = [e for e in json.load(open(f'{H}/data/Alafasy_128kbps.json')) if e['surah'] in (1, S)]
 QA = {(e['surah'], e['ayah']): e['segments'] for e in _qa}; QST = {(e['surah'], e['ayah']): e['stats'] for e in _qa}
 BISMILLAH = A == 1 and S not in (1, 9)
@@ -60,12 +60,17 @@ for n, k in enumerate(AY):
         o0 = max(0, sg[0][2] / 1000 - 0.05); o1 = min(d0, sg[-1][3] / 1000 + 0.15)
         WT = [[(sg[j][2] / 1000 - o0) / TEMPO, ((sg[j + 1][2] / 1000 if j + 1 < K else sg[j][3] / 1000 + 0.1) - o0) / TEMPO, j] for j in range(K)]
     else:
-        assert LONG, ('unaligned ayah in short', k)
         sd = subprocess.run(['ffmpeg', '-i', fn, '-af', 'silencedetect=n=-40dB:d=0.15', '-f', 'null', '-'], capture_output=True, text=True).stderr
         ends = [float(x) for x in re.findall(r'silence_end: ([0-9.]+)', sd)]; starts = [float(x) for x in re.findall(r'silence_start: ([0-9.]+)', sd)]
         o0 = max(0, (ends[0] if starts and starts[0] < 0.05 and ends else 0) - 0.05)
         o1 = min(d0, (starts[-1] if starts and starts[-1] > o0 + 0.5 and (len(ends) < len(starts)) else d0) + 0.15)
         WT = []
+        if not LONG:   # approximate word timing: spread words by letter count across the ayah
+            import unicodedata
+            wl = [max(1, sum(1 for c in w if not unicodedata.category(c).startswith('M'))) for w in AR[k]]
+            tot, acc, D = sum(wl), 0, (o1 - o0) / TEMPO
+            for j, w in enumerate(wl):
+                WT.append([acc / tot * D, (acc + w) / tot * D, j]); acc += w
     d = (o1 - o0) / TEMPO
     run('ffmpeg', '-v', 'error', '-y', '-ss', str(o0), '-t', str(o1 - o0), '-i', fn, '-af',
         f'atempo={TEMPO},afade=t=in:d=0.02,afade=t=out:st={max(0, d - 0.12)}:d=0.12', '-ar', '44100', '-ac', '1', f'{WORK}/r{n}.wav')
@@ -85,19 +90,19 @@ print('audio', round(TOTAL, 1), 's')
 DIG = '٠١٢٣٤٥٦٧٨٩'
 def ard(n): return ''.join(DIG[int(c)] for c in str(n))
 F = f'{H}/fonts'
-CSS = f"""@font-face{{font-family:AQ;src:url('file://{F}/AmiriQuran.ttf')}}@font-face{{font-family:AB;src:url('file://{F}/Amiri-Bold.ttf')}}@font-face{{font-family:NQ;src:url('file://{F}/nastaliq.ttf')}}
+CSS = f"""@font-face{{font-family:AQ;src:url('file://{F}/AmiriQuran.ttf')}}@font-face{{font-family:AB;src:url('file://{F}/Amiri-Bold.ttf')}}@font-face{{font-family:EN;src:url('file://{F}/EN.ttf')}}@font-face{{font-family:ENB;src:url('file://{F}/ENB.ttf')}}
 html,body{{margin:0;width:1080px;height:1920px;background:transparent;overflow:hidden}}
 .wrap{{position:absolute;left:60px;right:60px;top:500px;height:900px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px}}
 .ar{{direction:rtl;text-align:center;font-family:AQ;font-size:100px;line-height:1.85;color:#fff;text-shadow:0 0 10px rgba(255,230,180,.45),0 3px 10px rgba(0,0,0,.85)}}
 .m{{color:#ffd77a}}
-.ur{{direction:rtl;text-align:center;font-family:NQ;font-size:52px;line-height:1.9;color:#e8f1ff;text-shadow:0 2px 6px rgba(0,0,0,.9);background:rgba(5,10,30,.35);border-radius:30px;padding:0 30px 16px}}
+.ur{{direction:ltr;text-align:center;font-family:EN;font-size:50px;line-height:1.4;color:#e8f1ff;text-shadow:0 2px 6px rgba(0,0,0,.9);background:rgba(5,10,30,.35);border-radius:30px;padding:16px 34px 20px}}
 .hd{{position:absolute;top:150px;left:0;right:0;text-align:center;font-family:AB;font-size:100px;color:#ffe08a;text-shadow:0 0 14px rgba(255,210,140,.5),0 4px 8px #000}}
-.sub{{position:absolute;top:290px;left:0;right:0;text-align:center;font-family:NQ;font-size:42px;color:#dfe9ff;text-shadow:0 2px 6px #000;direction:rtl}}
+.sub{{position:absolute;top:290px;left:0;right:0;text-align:center;font-family:EN;font-size:36px;color:#dfe9ff;text-shadow:0 2px 6px #000;direction:ltr}}
 .line{{position:absolute;top:380px;left:50%;transform:translateX(-50%);width:420px;height:2px;background:linear-gradient(90deg,transparent,#ffe08a,transparent)}}"""
 if LONG:
     CSS = CSS.replace('width:1080px;height:1920px', 'width:1920px;height:1080px').replace('left:60px;right:60px;top:500px;height:900px', 'left:140px;right:140px;top:200px;height:760px')
     CSS = CSS.replace('.hd{{', '.hd{{').replace('top:150px;left:0;right:0;text-align:center;font-family:AB;font-size:100px', 'top:28px;left:0;right:0;text-align:center;font-family:AB;font-size:64px')
-    CSS = CSS.replace('top:290px;left:0;right:0;text-align:center;font-family:NQ;font-size:42px', 'top:118px;left:0;right:0;text-align:center;font-family:NQ;font-size:30px')
+    CSS = CSS.replace('top:290px;left:0;right:0;text-align:center;font-family:NQ;font-size:42px', 'top:118px;left:0;right:0;text-align:center;font-family:EN;font-size:26px')
     CSS = CSS.replace('top:380px;left:50%', 'top:180px;left:50%').replace('font-size:100px;line-height:1.85', 'font-size:84px;line-height:1.8')
 FIT = """()=>{const a=document.querySelector('.ar'),u=document.querySelector('.ur');let fa=FA,fu=52;
 for(let i=0;i<80;i++){if(a.offsetHeight+u.offsetHeight+36<=HT&&a.offsetHeight<=AH)break;
@@ -105,8 +110,8 @@ for(let i=0;i<80;i++){if(a.offsetHeight+u.offsetHeight+36<=HT&&a.offsetHeight<=A
 FIT = FIT.replace('FA', '84' if LONG else '100').replace('HT', '760' if LONG else '900').replace('AH', '480' if LONG else '600')
 NAY = max(a for s, a in AR if s == S)
 whole = A == 1 and B == NAY
-subtxt = ('مکمل سورت' if whole else f'آیات {ard(A)} تا {ard(B)}') + f' • پارہ {ard(juz(S, A))} • شیخ مشاری العفاسی'
-BISM_UR = 'شروع اللہ کے نام سے جو بڑا مہربان نہایت رحم والا ہے'
+subtxt = ('Full Surah' if whole else f'Verses {A}-{B}') + f' • Juz {juz(S, A)} • Sheikh Mishary Alafasy'
+BISM_UR = 'In the name of Allah, the Gracious, the Merciful.'
 def page(sgm):
     k = tuple(sgm['k']); ws = [f'<span class="w">{w}</span>' for w in AR[k]]
     if sgm['n']: ws[-1] = f'<span style="white-space:nowrap">{ws[-1]} <span class="m">۝{ard(sgm["n"])}</span></span>'
@@ -117,33 +122,32 @@ first = AR[(S, A)]
 snip = ' '.join(first[:5]) + (' …' if len(first) > 5 else '')
 rng = 'FULL' if whole else f'{A}-{B}'
 thumb = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-@font-face{{font-family:AB;src:url('file://{F}/Amiri-Bold.ttf')}}@font-face{{font-family:AQ;src:url('file://{F}/AmiriQuran.ttf')}}@font-face{{font-family:NQ;src:url('file://{F}/nastaliq.ttf')}}
+@font-face{{font-family:AB;src:url('file://{F}/Amiri-Bold.ttf')}}@font-face{{font-family:EN;src:url('file://{F}/EN.ttf')}}@font-face{{font-family:ENB;src:url('file://{F}/ENB.ttf')}}
 html,body{{margin:0;width:1080px;height:1920px;overflow:hidden;background:url('file://{WORK}/thumbbg.jpg')}}
-.t1{{position:absolute;top:470px;left:0;right:0;text-align:center;font-family:AB;font-size:{230 if len(ARN) <= 7 else 170}px;line-height:1.3;color:#ffe3a0;direction:rtl;text-shadow:0 6px 0 #5a4010,0 0 30px rgba(255,210,120,.55)}}
-.q{{position:absolute;top:840px;left:60px;right:60px;text-align:center;font-family:AQ;font-size:84px;color:#fff;direction:rtl;text-shadow:0 3px 8px #000}}
-.b{{position:absolute;top:1130px;left:160px;right:160px;background:rgba(10,20,40,.7);border:3px solid #ffe3a0;border-radius:60px;text-align:center;font-family:NQ;font-size:56px;color:#fff;padding:4px 0 28px;direction:rtl}}
-.en{{position:absolute;top:1320px;left:0;right:0;text-align:center;font:800 64px Arial;color:#ffe3a0;letter-spacing:4px;text-shadow:0 3px 6px #000}}
-.r{{position:absolute;top:1420px;left:0;right:0;text-align:center;font:600 44px Arial;color:#dfe8ff;text-shadow:0 3px 6px #000}}
-</style></head><body><div class="t1">{ARN}</div><div class="q">{snip}</div><div class="b">{subtxt.split(' • ')[0]} • اردو ترجمہ</div>
-<div class="en">SURAH {EN.upper()} {'' if whole else rng}</div><div class="r">Sheikh Mishary Alafasy</div></body></html>"""
+.t1{{position:absolute;top:500px;left:0;right:0;text-align:center;font-family:AB;font-size:{260 if len(ARN) <= 7 else 190}px;line-height:1.3;color:#ffe3a0;direction:rtl;text-shadow:0 6px 0 #5a4010,0 0 30px rgba(255,210,120,.55)}}
+.en{{position:absolute;top:880px;left:0;right:0;text-align:center;font-family:ENB;font-size:76px;color:#fff;letter-spacing:2px;text-shadow:0 4px 8px #000}}
+.b{{position:absolute;top:1040px;left:120px;right:120px;background:rgba(10,20,40,.7);border:3px solid #ffe3a0;border-radius:60px;text-align:center;font-family:ENB;font-size:42px;color:#ffe3a0;padding:26px 0}}
+.r{{position:absolute;top:1230px;left:0;right:0;text-align:center;font-family:EN;font-size:46px;color:#dfe8ff;text-shadow:0 3px 6px #000}}
+</style></head><body><div class="t1">{ARN}</div><div class="en">SURAH {EN.upper()}</div>
+<div class="b">{'FULL SURAH' if whole else 'VERSES ' + rng} &bull; ENGLISH TRANSLATION</div><div class="r">Sheikh Mishary Alafasy</div></body></html>"""
 if LONG:
     thumb = thumb.replace('width:1080px;height:1920px', 'width:1920px;height:1080px')
-    for a_, b_ in [('top:470px', 'top:90px'), ('top:840px;left:60px;right:60px', 'top:440px;left:160px;right:160px'), ('top:1130px;left:160px;right:160px', 'top:640px;left:560px;right:560px'),
-                   ('top:1320px', 'top:820px'), ('top:1420px', 'top:920px')]:
+    for a_, b_ in [('top:500px', 'top:120px'), ('top:880px', 'top:480px'), ('top:1040px;left:120px;right:120px', 'top:640px;left:480px;right:480px'),
+                   ('top:1230px', 'top:830px')]:
         thumb = thumb.replace(a_, b_)
 
 PHOTOS = sorted(os.listdir(f'{H}/photos'))
 CATS = {}
 for p in PHOTOS: CATS.setdefault(p.split('_')[0], []).append(p)
 # background follows the meaning of each ayah (keywords in the Urdu translation) -> photo category
-THEME = [(['garden', 'waterfall'], ['جنت', 'باغ', 'نہر', 'پھل', 'نعمت', 'درخت', 'کھیتی', 'سبز', 'چشم']),
-         (['sea', 'waterfall'], ['سمندر', 'دریا', 'پانی', 'کشتی', 'بارش', 'مینہ']),
-         (['sea'], ['صبح', 'سورج', 'روشنی', 'نور', 'چاشت', 'فجر']),
-         (['desert', 'clouds'], ['آگ', 'دوزخ', 'جہنم', 'عذاب', 'قیامت', 'ہلاک', 'ریت', 'صحرا', 'اونٹ', 'سختی', 'مشکل']),
-         (['night', 'stars'], ['رات', 'چاند', 'ستار', 'تاریک', 'اندھیر']),
-         (['stars', 'clouds'], ['آسمان', 'کائنات', 'بادل', 'ہوا']),
-         (['mountain'], ['پہاڑ', 'زمین', 'پتھر']),
-         (['mosque', 'clouds', 'forest'], ['ہدایت', 'نماز', 'مسجد', 'عبادت', 'سجد', 'ذکر', 'دعا', 'رحمت', 'بخش'])]
+THEME = [(['garden', 'waterfall'], ['garden', 'paradise', 'rivers', 'fruit', 'blessing', 'trees', 'green', 'spring', 'fountain']),
+         (['sea', 'waterfall'], ['sea', 'river', 'water', 'ship', 'rain', 'ocean']),
+         (['sea'], ['morning', 'sun', 'light', 'dawn', 'daybreak', 'forenoon', 'brightness']),
+         (['desert', 'clouds'], ['fire', 'hell', 'punishment', 'doom', 'resurrection', 'destroyed', 'camel', 'hardship', 'difficulty', 'torment']),
+         (['night', 'stars'], ['night', 'moon', 'star', 'dark', 'darkness']),
+         (['stars', 'clouds'], ['heaven', 'sky', 'skies', 'cloud', 'wind', 'universe']),
+         (['mountain'], ['mountain', 'earth', 'stone', 'rock']),
+         (['mosque', 'clouds', 'forest'], ['guidance', 'prayer', 'worship', 'prostrate', 'remember', 'mercy', 'forgive', 'forgiveness'])]
 DEFAULT = ['mountain', 'forest', 'clouds', 'stars', 'night', 'sea']
 def ss(x): x = max(0, min(1, x)); return x * x * (3 - 2 * x)
 def pick_photos():
@@ -151,8 +155,8 @@ def pick_photos():
     used, PB, last = set(), [], None
     for i, sg in enumerate(segs):
         k = tuple(sg['k']); u = BISM_UR if sg['n'] == 0 else UR.get(k, '')
-        best = max(THEME, key=lambda th: sum(u.count(w) for w in th[1]))
-        cats = best[0] if sum(u.count(w) for w in best[1]) else None
+        best = max(THEME, key=lambda th: sum(u.lower().count(w) for w in th[1]))
+        cats = best[0] if sum(u.lower().count(w) for w in best[1]) else None
         if cats is None and last is not None and i % 2 == 1: PB.append(last); continue   # keep scene for 2 ayahs
         cats = [c for c in (cats or [DEFAULT[(seed + i) % len(DEFAULT)]]) if c in CATS] or DEFAULT
         pool = [p for c in cats for p in CATS.get(c, [])]
@@ -280,23 +284,23 @@ if __name__ == '__main__':
     run('ffmpeg', '-v', 'error', '-y', '-i', f'{WORK}/vid.mp4', '-i', f'{WORK}/final.wav', '-map', '0:v', '-map', '1:a', '-c:v', 'copy',
         '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', out)
     rng_t = 'Full' if whole else f'{A}-{B}'
-    title = f'Surah {EN} {rng_t} | سورہ {ARN} | Mishary Alafasy 🤍 Urdu Translation #shorts #quran'
-    if len(title) > 100: title = f'Surah {EN} {rng_t} | سورہ {ARN} | Mishary Alafasy 🤍 #shorts #quran'
+    CREDIT = 'Translation by Talal Itani, ClearQuran.com'
+    first_en = UR[(S, A)] if (S, A) in UR else ''
+    title = f'Surah {EN} {rng_t} | Mishary Alafasy 🤍 English Translation #shorts #quran'
     tag = EN.lower().replace('-', '').replace(' ', '')
     meta = {'file': out, 'name': os.path.basename(out), 'duration': round(D, 1), 'S': S, 'A': A, 'B': B,
             'youtube_title': title,
-            'youtube_text': f'Surah {EN} ({rng_t}) with Urdu translation | Sheikh Mishary Rashid Alafasy 🤍\n\n{" ".join(first)}\n\nSubscribe to Peaceful Tilawat for daily Quran recitation.\n#shorts #quran #surah{tag} #tilawat #mishary #urdutranslation',
-            'youtube_tags': ['quran', f'surah {EN.lower()}', 'tilawat', 'mishary alafasy', 'urdu translation', 'quran shorts'],
-            'tiktok_title': f'سورہ {ARN} {"" if whole else "آیت " + rng_t} | Surah {EN} 🤍'.replace('  ', ' '),
-            'tiktok_text': f'سورہ {ARN} {"مکمل" if whole else "آیت " + rng_t} | Surah {EN} | Mishary Alafasy 🤍 اردو ترجمہ کے ساتھ\n#quran #surah{tag} #tilawat #islam #fyp',
-            'pin_comment': f'{" ".join(first)} 🤍 کون کون سن رہا ہے؟ کمنٹ میں "سبحان اللہ" لکھیں اور Peaceful Tilawat کو سبسکرائب کریں'}
+            'youtube_text': f'Surah {EN} ({rng_t}) with English translation | Sheikh Mishary Rashid Alafasy 🤍\n\n"{first_en}"\n\nSubscribe to Peaceful Tilawat for daily Quran recitation.\n{CREDIT}\n#shorts #quran #surah{tag} #tilawat #mishary #englishtranslation',
+            'youtube_tags': ['quran', f'surah {EN.lower()}', 'quran recitation', 'mishary alafasy', 'english translation', 'quran with english translation', 'quran shorts'],
+            'tiktok_title': f'Surah {EN} {rng_t} 🤍 Quran with English translation',
+            'tiktok_text': f'Surah {EN} {"Full" if whole else "verses " + rng_t} | Mishary Alafasy 🤍 English translation\n#quran #surah{tag} #quranrecitation #islam #fyp #englishtranslation',
+            'pin_comment': f'"{first_en}" 🤍 Who is listening? Write "SubhanAllah" in the comments and subscribe to Peaceful Tilawat.'}
     if LONG:
-        rl = 'Full' if whole else f'Ayat {A}-{B}'
-        t1 = f'Surah {EN} ({rl}) | سورہ {ARN} | Mishary Alafasy | Urdu Translation 🤍 Heart Touching Tilawat'
-        if len(t1) > 100: t1 = f'Surah {EN} ({rl}) | سورہ {ARN} | Mishary Alafasy | Urdu Translation 🤍'
-        mins = int(D // 60)
+        rl = 'Full' if whole else f'Verses {A}-{B}'
+        t1 = f'Surah {EN} ({rl}) | Mishary Alafasy | English Translation 🤍 Heart Touching Quran Recitation'
+        if len(t1) > 100: t1 = f'Surah {EN} ({rl}) | Mishary Alafasy | English Translation 🤍'
         meta.update({'youtube_title': t1,
-                     'youtube_text': f'Surah {EN} ({rl}) – beautiful recitation by Sheikh Mishary Rashid Alafasy with Urdu translation (Fateh Muhammad Jalandhari) and word-by-word highlight 🤍\n\n{" ".join(first)}\n\nسورہ {ARN} {"مکمل" if whole else "آیات " + str(A) + " تا " + str(B)} • اردو ترجمہ کے ساتھ\n\nSubscribe to Peaceful Tilawat for daily Quran recitation.\n#quran #surah{tag} #tilawat #mishary #urdutranslation #quranrecitation',
-                     'youtube_tags': ['quran', f'surah {EN.lower()}', 'tilawat', 'mishary alafasy', 'urdu translation', 'quran recitation', 'heart touching tilawat']})
+                     'youtube_text': f'Surah {EN} ({rl}) - beautiful recitation by Sheikh Mishary Rashid Alafasy with English translation and word-by-word highlight 🤍\n\n"{first_en}"\n\nSubscribe to Peaceful Tilawat for daily Quran recitation.\n{CREDIT}\n#quran #surah{tag} #quranrecitation #mishary #englishtranslation #tilawat',
+                     'youtube_tags': ['quran', f'surah {EN.lower()}', 'quran recitation', 'mishary alafasy', 'english translation', 'quran with english translation', 'heart touching quran']})
     json.dump(meta, open(f'{WORK}/meta.json', 'w'), ensure_ascii=False, indent=1)
     print(json.dumps(meta, ensure_ascii=False, indent=1))
