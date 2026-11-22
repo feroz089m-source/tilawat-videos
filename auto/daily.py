@@ -5,15 +5,18 @@ import json, os, sys, subprocess, shutil, datetime
 H = os.path.dirname(os.path.abspath(__file__)); REPO = os.path.dirname(H)
 DRY = '--dry' in sys.argv
 LONG = '--long' in sys.argv
-UR = '--ur' in sys.argv   # Urdu TikTok build: same plan item as the English short, separate branch, no state advance
-WK = f'{H}/work_long' if LONG else (f'{H}/work_ur' if UR else f'{H}/work')
+UR = '--ur' in sys.argv
+CUST = bool(os.environ.get('CUSTOM_AUD'))   # custom recitation file: no state advance
+XARGS = [a for a in sys.argv[1:] if a.isdigit()]   # Urdu TikTok build: same plan item as the English short, separate branch, no state advance
+WK = f'{H}/work_long' if LONG else ((f'{H}/work_urc' if CUST else f'{H}/work_ur') if UR else (f'{H}/work_c' if CUST else f'{H}/work'))
 BR = 'media_long' if LONG else ('media_ur' if UR else 'media')
+BS = ('build_ur' if UR else 'build') + ('_c' if CUST else '') + '.py'
 env = dict(os.environ, LONG='1' if LONG else '0')
 GIT = ['git', '-C', REPO, '-c', 'user.name=feroz089m-source', '-c', 'user.email=feroz089m-source@users.noreply.github.com']
 def run(*a, **k): return subprocess.run(list(a), check=True, **k)
 
 shutil.rmtree(WK, ignore_errors=True)
-run(sys.executable, f'{H}/build_ur.py' if UR else f'{H}/build.py', stdout=subprocess.DEVNULL, env=env)
+run(sys.executable, f'{H}/{BS}', *XARGS, stdout=subprocess.DEVNULL, env=env)
 meta = json.load(open(f'{WK}/meta.json'))
 assert os.path.getsize(meta['file']) < 95e6, 'video too large for GitHub'
 OWNER_REPO = 'feroz089m-source/tilawat-videos'
@@ -28,7 +31,7 @@ if not DRY:
     g = ['git', '-C', tmp, '-c', 'user.name=feroz089m-source', '-c', 'user.email=feroz089m-source@users.noreply.github.com']
     run(*g, 'add', '.'); run(*g, 'commit', '-qm', f'media {meta["name"]}')
     run(*g, 'push', '-f', url, f'{BR}:{BR}')
-    if UR: print('META_JSON=' + json.dumps(meta, ensure_ascii=False)); sys.exit(0)
+    if UR or CUST: print('META_JSON=' + json.dumps(meta, ensure_ascii=False)); sys.exit(0)
     # 2) advance state on main
     sp = f'{H}/state_long.json' if LONG else f'{H}/state.json'
     st = json.load(open(sp)) if os.path.exists(sp) else {'next': 0, 'done': []}
